@@ -6,6 +6,7 @@ Este proyecto contiene la configuración de Docker para crear y cargar automáti
 
 - `Dockerfile`: Define la imagen Docker basada en MySQL 8.0
 - `docker-compose.yml`: Configuración de Docker Compose para facilitar el despliegue
+- pliegue
 - `init.sql`: Script SQL con todas las tablas y datos iniciales
 - `guidelines.tex`: Orientación del proyecto
 

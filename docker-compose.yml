@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mysqllab:
     build: .
@@ -21,7 +19,23 @@ services:
       timeout: 5s
       retries: 5
 
+  mongodb:
+    image: mongo:7
+    container_name: greenscape_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: mongo_pass
+      MONGO_INITDB_DATABASE: GreenScape
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+
+
 volumes:
   mysql_data:
     driver: local
-
+  mongo_data:
+    driver: local
