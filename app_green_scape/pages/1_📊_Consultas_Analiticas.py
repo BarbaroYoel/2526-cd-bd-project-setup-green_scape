@@ -2,12 +2,26 @@ import streamlit as st
 from queries import analytical_queries as aq
 import pandas as pd
 
+st.set_page_config(page_title="Consultas Analíticas", page_icon="📊", layout="wide")
 st.header("📊 Consultas Analíticas")
 
 query_options = {
-    "3.a: Listar todos los productos disponibles": "get_all_products",
-    "3.g: Promedio de actividad mensual": "get_monthly_activity_average",
-    "3.k: Cambio de preferencias": "get_category_preference_changes",
+    "a: Listar todos los productos disponibles": "get_all_products",
+    "b: Top Publicaciones por Cantidad de Reacciones": "query_b_top_reactions",
+    "c: Conteo de 'Me Gusta' por Producto": "query_c_likes_by_product",
+    "d: Última Actividad de Usuario (Reacción/Cont.)": "query_d_last_activity_6m",
+    "e: Publicaciones Positivas vs. Negativas": "query_e_pos_vs_neg_reactions",
+    "f: Plantas con Contribuciones Consecutivas": "query_f_consecutive_contributions",
+    
+    "g: Promedio de actividad mensual": "get_monthly_activity_average",
+    "h: Distribución de Usuarios por Rango de Edad": "query_h_age_distribution",
+    "i: Productos con Patrones de Compra Estables": "query_i_stable_purchase_patterns",
+    "j: Tendencias de Contribución por Clima": "contribution_trends_by_climate",
+    "k: Cambio de preferencias de categorías": "get_category_preference_changes",
+    "n: Vendedores Mejor Valorados (Compra)": "top_rated_sellers", 
+    
+    "l: Usuarios 'Raritos' (Compra vs. Gusto)": "query_l_raritos_compra_vs_gusto",
+    "m: Usuarios sin Contenido Multimedia en Pub.": "query_m_users_without_multimedia",
 }
 
 selected_query = st.selectbox("Selecciona una consulta:", list(query_options.keys()))

@@ -1,14 +1,14 @@
 from utils.mongo_connector import MongoConnector
 
-def initialize_mongo_data():
-    coleccion = MongoConnector.get_collection()
+def initialize_mongo_plant_documents():
+    coleccion = MongoConnector.get_collection(MongoConnector.COLLECTION_PLANTAS)
     if coleccion is None: 
         print("No se puede conectar a MongoDB para insertar datos.")
         return
 
-    coleccion.delete_many({}) 
-    print(f"Colección {coleccion.name} limpiada.")
-
+    deleted = coleccion.delete_many({}) 
+    print(f"Limpieza: Se eliminaron {deleted.deleted_count} documentos de la colección '{coleccion.name}'.")
+    
     documentos_plantas = [
         {
             "IDProd": 1, 
@@ -111,4 +111,4 @@ def initialize_mongo_data():
     print(f"Documentos de MongoDB insertados: {len(result.inserted_ids)}")
 
 if __name__ == '__main__':
-    initialize_mongo_data()
+    initialize_mongo_plant_documents()

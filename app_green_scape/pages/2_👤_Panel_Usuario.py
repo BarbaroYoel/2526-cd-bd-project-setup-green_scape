@@ -3,6 +3,7 @@ from queries import user_queries as uq
 import pandas as pd
 from datetime import date
 
+st.set_page_config(page_title="Panel Usuario", page_icon="👤", layout="wide")
 st.header("👤 Panel Usuario")
 
 st.subheader("Análisis de Actividad de Usuario")
@@ -44,7 +45,6 @@ if st.button("Analizar Actividad"):
                 
                 st.metric("Total Contribuciones", result.get('total_contribuciones', 0))
                 
-                # Plantas
                 st.subheader("Plantas Más Compradas y Contribuidas")
                 st.write(f"**Planta Más Comprada:** {result.get('planta_mas_comprada', 'N/A')}")
                 st.write(f"**Planta Más Contribuida:** {result.get('planta_mas_contribuida', 'N/A')}")

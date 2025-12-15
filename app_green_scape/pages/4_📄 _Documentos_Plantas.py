@@ -2,9 +2,8 @@ import streamlit as st
 import pandas as pd
 from queries.plant_documents_queries import get_plant_documentation, get_available_plants 
 
-st.set_page_config(page_title="Documentación Botánica (Mongo)", page_icon="📄", layout="wide")
+st.set_page_config(page_title="Documentación Botánica", page_icon="📄", layout="wide")
 st.title("🌿 Explorador de Documentación Jerárquica (MongoDB)")
-st.caption("Los datos de la planta se obtienen de MySQL, y la Ficha Técnica y Documentos Secundarios se obtienen de MongoDB.")
 st.markdown("---")
 
 productos = get_available_plants()
@@ -58,7 +57,7 @@ if st.button("Buscar Documentación Detallada"):
                         tipo = doc.get('tipo', 'Documento Secundario')
                         titulo = doc.get('titulo', 'Sin Título')
                         
-                        with st.expander(f"**{tipo}:** {titulo}", expanded=(i < 2)): # Expandir los primeros dos por defecto
+                        with st.expander(f"**{tipo}:** {titulo}", expanded=(i < 0)):
                             
                             datos_especificos = {k: v for k, v in doc.items() if k not in ['tipo', 'titulo']}
                             

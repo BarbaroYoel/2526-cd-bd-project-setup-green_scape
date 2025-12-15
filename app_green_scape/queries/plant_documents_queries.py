@@ -2,7 +2,7 @@ from utils.mongo_connector import MongoConnector
 from utils.database_connector import DatabaseConnector 
 
 def get_plant_documentation(id_prod):
-    coleccion = MongoConnector.get_collection()
+    coleccion = MongoConnector.get_collection(MongoConnector.COLLECTION_PLANTAS)
     if coleccion is None:
         return None
         

@@ -19,3 +19,18 @@ class DatabaseConnector:
         finally:
             cursor.close()
             conn.close()
+
+    @staticmethod
+    def execute_ddl_dml(query, params=None):
+        conn = DatabaseConnector.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(query, params or [])
+            conn.commit()
+            return cursor.rowcount 
+        except mysql.connector.Error as err:
+            conn.rollback() 
+            raise Exception(f"Database DDL/DML error: {err}")
+        finally:
+            cursor.close()
+            conn.close()
