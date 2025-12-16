@@ -1,0 +1,111 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+\title{\textbf{Informe Técnico: Proyecto GreenScape}}
+\author{David Michel Batista \and Barbaro Yoel Martínez González}
+\date{Asignatura: Bases de Datos \\ Grupo: D\_211}
+
+\begin{document}
+\maketitle
+\thispagestyle{plain} % Asegura que la primera página tenga encabezados/pies si se usan
+
+\section{Introducción}
+
+El presente informe detalla las decisiones técnicas, arquitectónicas y de diseño adoptadas por nuestro equipo para la implementación de las funcionalidades avanzadas de la plataforma \texttt{GreenScape}. El enfoque principal ha sido la ingeniería de datos híbrida, combinando la robustez de una base de datos relacional (\texttt{MySQL}) para transacciones comerciales y estructura de usuarios, con la flexibilidad de una base de datos documental (\texttt{MongoDB}) para gestión de contenido no estructurado.
+
+
+\section{Comparación de Diseños para Conversaciones en Comentarios }
+
+Para abordar el requerimiento de permitir conversaciones anidadas en los comentarios, implementamos y evaluamos dos enfoques distintos. A continuación, presentamos nuestro análisis comparativo, incluyendo los resultados de las pruebas de rendimiento.
+
+\subsection{Modelo Relacional (MySQL)}
+
+\textbf{Implementación:}
+Modificamos la tabla \texttt{Comentar} para incluir una columna \texttt{IDPadre} que actúa como una clave foránea recursiva referenciando a la misma tabla.
+
+\begin{itemize}
+    \item \textbf{Consulta:} Para reconstruir un hilo completo, utilizamos \textbf{CTEs Recursivas} (\texttt{WITH RECURSIVE}). Esto nos permite iterar desde el comentario raíz hacia abajo a través de todos los niveles de profundidad.
+    \item \textbf{Integridad:} Configuramos \texttt{ON DELETE CASCADE} en la clave foránea \texttt{IDPadre}.
+\end{itemize}
+
+\textbf{Ventajas:}
+\begin{enumerate}
+    \item \textbf{Integridad Referencial:} El motor de base de datos garantiza que no existan comentarios huérfanos. Si se borra un padre, la cascada elimina automáticamente a los hijos.
+    \item \textbf{Eficiencia Teórica en Escritura:} Insertar un nuevo comentario es una operación atómica simple (\texttt{INSERT}) que no requiere cálculos previos complejos. \textbf{No obstante, en nuestras pruebas, el costo transaccional del \texttt{COMMIT} resultó en un tiempo de escritura mayor que el del modelo no relacional.}
+\end{enumerate}
+
+\textbf{Desventajas:}
+\begin{enumerate}
+    \item \textbf{Complejidad de Lectura:} A medida que la profundidad del hilo crece, la consulta recursiva se vuelve computacionalmente costosa, ya que el motor debe realizar múltiples \texttt{JOIN} internos en tiempo de ejecución, reflejado en nuestro tiempo de prueba.
+    \item \textbf{Escalabilidad:} En escenarios de alto tráfico de lectura (típico de redes sociales), la recursividad constante puede saturar el servidor de base de datos.
+\end{enumerate}
+
+\subsection{Modelo No Relacional (MongoDB)}
+
+\textbf{Implementación:}
+Diseñamos un modelo híbrido enriquecido. Cada documento de comentario almacena su \texttt{IDPadre}, pero decidimos desnormalizar datos clave añadiendo dos campos adicionales: \texttt{IDRaiz} (el ID del comentario que inició el hilo) y \texttt{Nivel} (profundidad en el árbol).
+
+\begin{itemize}
+    \item \textbf{Consulta:} La recuperación del hilo no requiere recursividad. Realizamos una única consulta \texttt{find(\{ 'IDRaiz': ... \})} y ordenamos los resultados en la capa de aplicación (\texttt{Python}) utilizando un algoritmo topológico.
+    \item \textbf{Escritura:} Antes de insertar, realizamos una lectura del padre para heredar el \texttt{IDRaiz} y calcular el \texttt{Nivel + 1}. Esta operación, a pesar de su complejidad lógica, \textbf{resultó ser significativamente más rápida en la práctica que la operación transaccional de \texttt{MySQL}}.
+\end{itemize}
+
+\textbf{Ventajas:}
+\begin{enumerate}
+    \item \textbf{Velocidad de Lectura Extrema:} Recuperar un hilo de 100 comentarios requiere una sola consulta indexada por \texttt{IDRaiz}, evitando las uniones recursivas. Nuestro tiempo de prueba lo confirma, siendo ideal para la carga rápida de la interfaz de usuario.
+    \item \textbf{Velocidad de Escritura Empírica:} A pesar de la lógica adicional requerida (lectura del padre y cálculo del \texttt{IDRaiz}/\texttt{Nivel}), el diseño de \texttt{MongoDB}, que evita el \texttt{COMMIT} transaccional pesado de \texttt{SQL}, demostró ser superior para la inserción de nuevos comentarios.
+    \item \textbf{Flexibilidad:} Podemos añadir metadatos al comentario (reacciones anidadas, tipos de contenido) sin alterar el esquema global.
+\end{enumerate}
+
+\textbf{Desventajas:}
+\begin{enumerate}
+    \item \textbf{Integridad Lógica:} La integridad referencial depende de la lógica de la aplicación. Si se borra un comentario en \texttt{MongoDB}, debemos encargarnos manualmente de borrar sus descendientes o el hilo quedaría corrupto.
+\end{enumerate}
+
+\subsection{Conclusión y Selección}
+
+Tras realizar pruebas de rendimiento (utilizando el módulo \texttt{6\_\(\#\)\_MySQL\_vs\_Mongo\_Comentarios.py} que desarrollamos), concluimos que el \textbf{Modelo No Relacional (\texttt{MongoDB})} es más apropiado para este escenario específico de \texttt{GreenScape}.
+
+\textbf{Razón:} En una red social, la proporción de lecturas frente a escrituras suele ser muy alta (muchos usuarios leen los comentarios, pocos escriben). La optimización de lectura que ofrece \texttt{MongoDB} mediante el campo \texttt{IDRaiz}, junto con el rendimiento inesperadamente superior en escritura, supera por amplio margen las desventajas de gestionar la integridad referencial en la aplicación, ofreciendo una mejor experiencia de usuario final.
+
+
+\section{Justificación del Modelo de Documentación Jerárquica de Plantas }
+
+Para el sistema de documentación de plantas, nos enfrentamos al reto de almacenar información con estructura variable (certificados, guías de riego, análisis de suelo) asociada a una entidad principal. Decidimos utilizar \textbf{MongoDB} basándonos en los siguientes criterios:
+
+\subsection{Estructura Variable y Polimorfismo}
+Las fichas técnicas de las plantas no son uniformes. Un "Certificado Fitosanitario" tiene campos como \texttt{fecha\_inspeccion} y \texttt{validez}, mientras que un "Análisis de Suelo" tiene \texttt{ph\_optimo} y \texttt{drenaje}.
+\begin{itemize}
+    \item En un modelo relacional, esto hubiera requerido múltiples tablas (\texttt{Planta\_Certificados}, \texttt{Planta\_Suelos}, etc.) o una tabla con muchas columnas nulas.
+    \item En \texttt{MongoDB}, utilizamos el patrón de \textbf{Documentos Embebidos}. Creamos una colección \texttt{plantas} donde cada documento contiene un array \texttt{DocumentosSecundarios}. Cada objeto dentro de este array puede tener un esquema totalmente diferente sin generar conflictos.
+\end{itemize}
+
+\subsection{Consultas Atómicas}
+Al visualizar la documentación de una planta en la aplicación, el usuario necesita ver \textit{toda} la información simultáneamente.
+\begin{itemize}
+    \item Nuestro diseño permite recuperar la Ficha Técnica principal y todos sus documentos secundarios (independientemente de su tipo y cantidad) en \textbf{una sola operación de lectura}. Esto reduce drásticamente la latencia de red en comparación con realizar múltiples \texttt{SELECT} o \texttt{JOIN}s complejos en \texttt{SQL}.
+\end{itemize}
+
+\subsection{Jerarquía Natural}
+La información botánica es intrínsecamente jerárquica (Planta $\rightarrow$ Ficha $\rightarrow$ Documentos Específicos $\rightarrow$ Detalles). El formato \texttt{JSON} de \texttt{MongoDB} mapea esta estructura de forma natural, simplificando el código de la aplicación (\texttt{Python}).
+
+
+\section{Otras Consideraciones Técnicas Relevantes}
+
+Durante el desarrollo del proyecto, tomamos decisiones de diseño adicionales para asegurar la robustez y cumplir con las restricciones técnicas:
+
+\begin{enumerate}
+    \item \textbf{Uso de Controladores Nativos (Sin ORM):}
+    Cumpliendo estrictamente con las restricciones, evitamos el uso de herramientas como \texttt{SQLAlchemy}. Desarrollamos nuestras propias clases envoltorios (\texttt{DatabaseConnector} para \texttt{mysql-connector} y \texttt{MongoConnector} para \texttt{pymongo}).
+
+    \item \textbf{Sincronización de Datos (Migración):}
+    Para facilitar la transición y comparación entre \texttt{SQL} y \texttt{NoSQL}, implementamos scripts de migración (\texttt{setup\_comments\_to\_mongo.py}). Decidimos mantener los mismos identificadores (\texttt{IDCom} de \texttt{MySQL} se convierte en \texttt{\_id} en \texttt{MongoDB}). Esto fue crucial para asegurar que la integridad de los datos se mantuviera al pasar de un entorno relacional a uno documental, permitiendo pruebas comparativas fidedignas.
+\end{enumerate}
+
+\end{document}

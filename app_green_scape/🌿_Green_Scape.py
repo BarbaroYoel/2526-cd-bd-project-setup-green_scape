@@ -13,5 +13,6 @@ st.markdown("""
         - 💰 **Gestor de Precios**: Auditoría de cambios con triggers
         - 🪴 **Documentos de Plantas**: Gestión de información jerárquica
         - 💬 **Foro de Comentarios**: Visualización de hilos recursivos
+        - ⚔️ **MySQL vs Mongo Comentarios**: Comparativa de rendimiento
     """)
     

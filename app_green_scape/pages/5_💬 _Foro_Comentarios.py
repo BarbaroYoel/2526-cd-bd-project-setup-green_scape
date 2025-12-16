@@ -6,7 +6,7 @@ from queries.sql_comment_queries import (
     get_available_users, 
     get_available_publications, 
     get_root_comments_for_pub, 
-    insert_new_comment
+    insert_new_comment_sql
 )
 from utils.database_connector import DatabaseConnector
 
@@ -40,7 +40,7 @@ def display_thread(hilo, id_pub_actual, root_id, users_map):
                 submit_reply = st.form_submit_button("Enviar Respuesta")
                 
                 if submit_reply and reply_content:
-                    new_id = insert_new_comment(reply_content, reply_user_id, id_pub_actual, idcom)
+                    new_id = insert_new_comment_sql(reply_content, reply_user_id, id_pub_actual, idcom)
                     if new_id:
                         st.success(f"Respuesta enviada exitosamente. Nuevo ID: {new_id}")
                         st.session_state['current_root_id'] = root_id 
@@ -148,7 +148,7 @@ def app_hilos_conversacion():
             submit_new = st.form_submit_button("Crear Hilo Raíz")
             
             if submit_new and new_content:
-                new_root_id = insert_new_comment(new_content, new_user_id, id_pub_seleccionada, None)
+                new_root_id = insert_new_comment_sql(new_content, new_user_id, id_pub_seleccionada, None)
                 if new_root_id:
                     st.success(f"Nuevo hilo creado. ID: {new_root_id}")
                     st.session_state['current_root_id'] = new_root_id 

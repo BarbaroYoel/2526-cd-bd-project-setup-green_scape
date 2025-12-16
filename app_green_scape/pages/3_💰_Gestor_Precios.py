@@ -131,7 +131,6 @@ with col_button:
                 get_historial_precios.clear()
                 
                 st.success(f"Precio de '{nombre_producto}' actualizado a ${nuevo_precio:.2f}.")
-                st.balloons() 
                 
             except Exception as e:
                 st.error(f"Error al actualizar precio en DB: {e}")

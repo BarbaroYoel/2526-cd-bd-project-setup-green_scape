@@ -82,7 +82,7 @@ def get_root_comments_for_pub(id_pub):
         print(f"Error al cargar hilos raíz: {e}")
         return []
 
-def insert_new_comment(contenido, idu, idpub, idpadre=None):
+def insert_new_comment_sql(contenido, idu, idpub, idpadre=None):
     sql = "INSERT INTO Comentar (Contenido, IDU, IDPub, IDPadre) VALUES (%s, %s, %s, %s)"
     conn = DatabaseConnector.get_connection()
     cursor = conn.cursor()
@@ -114,3 +114,14 @@ def delete_comment_sql(comment_id):
     finally:
         if cursor: cursor.close()
         if conn: conn.close()
+
+
+def get_available_publications():
+    """Obtiene una lista de publicaciones para el selector desde SQL."""
+    query = "SELECT IDPub, Texto FROM Publicacion LIMIT 50" 
+    try:
+        results = DatabaseConnector.execute_query(query)
+        return {r['IDPub']: f"{r.get('Texto', 'Publicación sin texto')} (ID: {r['IDPub']})" for r in results}
+    except Exception as e:
+        print(f"Error en get_available_publications: {e}")
+        return {}

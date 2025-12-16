@@ -90,3 +90,14 @@ def delete_comment_mongo(comment_id):
     except Exception as e:
         print(f"Error al eliminar comentario Mongo ID {comment_id}: {e}")
         return 0
+
+def get_root_comments_for_pub_mongo(id_pub):
+    collection = MongoConnector.get_collection(MongoConnector.COLLECTION_COMENTARIOS)
+    if collection is None: return []
+
+    cursor = collection.find({
+        "IDPub": id_pub, 
+        "$where": "this.IDRaiz.toString() == this._id.toString()"
+    }, {"_id": 1, "Contenido": 1, "Fecha": 1}).sort("Fecha", -1).limit(20)
+    
+    return [{"IDCom": doc['_id'], "Snippet": doc['Contenido'][:70]} for doc in cursor]
