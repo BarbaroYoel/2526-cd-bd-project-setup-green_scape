@@ -65,28 +65,45 @@ ORDER BY Total_Reacciones DESC;
 """
     return DatabaseConnector.execute_query(query)
 
-# 
 def query_f_consecutive_contributions():
-    """f: Plantas con Contribuciones en Meses Consecutivos por el Mismo Usuario"""
+    """f: Plantas con Contribuciones en Meses Consecutivos (por cualquier usuario)."""
     query = """
-WITH ContribucionesRankeadas AS (
-    SELECT 
+WITH MesesDeContribucion AS (
+    SELECT DISTINCT
+        ctr.IDProd,
         plt.NombreComun,
-        ctr.IDU,
-        ctr.Fecha,
-        LAG(ctr.Fecha, 1) OVER (PARTITION BY ctr.IDU, plt.IDProd ORDER BY ctr.Fecha) AS Fecha_Anterior
-    FROM Planta plt
-    JOIN Contribucion AS ctr ON plt.IDProd = ctr.IDProd
+        YEAR(ctr.Fecha) AS Anio,
+        MONTH(ctr.Fecha) AS Mes
+    FROM Contribucion AS ctr
+    JOIN Planta AS plt ON ctr.IDProd = plt.IDProd
+),
+MesesRankeados AS (
+    SELECT
+        NombreComun,
+        (Anio * 12) + Mes AS Mes_Secuencial_Actual,
+        LAG((Anio * 12) + Mes, 1) OVER (PARTITION BY IDProd ORDER BY Anio, Mes) AS Mes_Secuencial_Anterior
+    FROM MesesDeContribucion
 )
-SELECT DISTINCT 
+SELECT DISTINCT
     NombreComun
-FROM ContribucionesRankeadas
+FROM MesesRankeados
 WHERE 
-    (YEAR(Fecha) = YEAR(Fecha_Anterior) AND MONTH(Fecha) = MONTH(Fecha_Anterior) + 1) OR 
-    (YEAR(Fecha) = YEAR(Fecha_Anterior) + 1 AND MONTH(Fecha) = 1 AND MONTH(Fecha_Anterior) = 12)
-;
+    Mes_Secuencial_Actual = Mes_Secuencial_Anterior + 1
+ORDER BY NombreComun;
 """
     return DatabaseConnector.execute_query(query)
+
+# SELECT 
+#     plt.NombreComun,
+#     YEAR(ctr.Fecha) AS Anio,
+#     MONTH(ctr.Fecha) AS Mes,
+#     COUNT(*) AS Total_Contribuciones_En_Mes
+# FROM Contribucion AS ctr
+# JOIN Planta AS plt ON ctr.IDProd = plt.IDProd
+# GROUP BY plt.NombreComun, Anio, Mes
+# ORDER BY plt.NombreComun, Anio, Mes;
+
+
 
 def get_monthly_activity_average():
     """g: Promedio de actividad mensual"""
@@ -142,26 +159,40 @@ ORDER BY Rango_de_Edad;
 """
     return DatabaseConnector.execute_query(query)
 
-# 
 def query_i_stable_purchase_patterns():
-    """i: Productos con patrones de compra estables (Cantidad no menor a la anterior)"""
+    """i: Productos que no han mostrado un incremento en sus ventas mes a mes durante el último año."""
     query = """
-WITH RankedPurchases AS (
+WITH VentasMensuales AS (
+    SELECT
+        c.IDProd,
+        p.Nombre AS NombrePlanta,
+        YEAR(c.Fecha) AS Anio,
+        MONTH(c.Fecha) AS Mes,
+        SUM(c.Cantidad) AS Total_Vendido
+    FROM Compra c
+    JOIN Producto p ON c.IDProd = p.IDProd
+    WHERE c.Fecha BETWEEN DATE_SUB(CURDATE(), INTERVAL 48 MONTH) AND CURDATE()
+    GROUP BY c.IDProd, p.Nombre, Anio, Mes
+),
+ComparacionMensual AS (
     SELECT
         IDProd,
-        IDUV,
-        Cantidad,
-        Fecha,
-        ROW_NUMBER() OVER (PARTITION BY IDProd, IDUV ORDER BY Fecha) AS rn,
-        LAG(Cantidad, 1, 0) OVER (PARTITION BY IDProd, IDUV ORDER BY Fecha) AS Cantidad_Anterior
-    FROM Compra
-    WHERE Fecha BETWEEN DATE_SUB(CURDATE(), INTERVAL 1 YEAR) AND CURDATE()
+        NombrePlanta,
+        Anio,
+        Mes,
+        Total_Vendido,
+        LAG(Total_Vendido, 1, 0) OVER (PARTITION BY IDProd ORDER BY Anio, Mes) AS Venta_Mes_Anterior
+    FROM VentasMensuales
 )
+-- 3. Identificamos los productos que NO han tenido un incremento constante.
 SELECT DISTINCT
-    IDProd
-FROM RankedPurchases
-GROUP BY IDProd
-HAVING SUM(CASE WHEN Cantidad >= Cantidad_Anterior THEN 1 ELSE 0 END) = COUNT(*);
+    IDProd,
+    NombrePlanta
+FROM ComparacionMensual
+-- Buscamos productos que en AL MENOS un mes, la venta actual NO FUE mayor que la anterior (<=).
+-- Si al menos un mes no creció, el patrón no es de "incremento constante".
+WHERE Total_Vendido <= Venta_Mes_Anterior 
+ORDER BY IDProd;
 """
     return DatabaseConnector.execute_query(query)
 
@@ -303,4 +334,151 @@ ORDER BY usu.IDU;
 """
     return DatabaseConnector.execute_query(query)
 
+def analyze_influencers_impact():
+    """
+    p) Análisis de influencers: Top 5, sus plantas, impacto en ventas y conversión.
+    """
+    results = []
+
+    sql_top_influencers = """
+    WITH ReaccionesPonderadas AS (
+        SELECT IDPub, 
+               SUM(CASE 
+                   WHEN Tipo = 'me gusta' THEN 1 
+                   WHEN Tipo = 'me encanta' THEN 2 
+                   WHEN Tipo = 'me asombra' THEN 1.5 
+                   ELSE 0 END) as score_reac
+        FROM Reaccionar GROUP BY IDPub
+    ),
+    ComentariosPonderados AS (
+        SELECT IDPub, COUNT(*) * 2 as score_com
+        FROM Comentar GROUP BY IDPub
+    )
+    SELECT 
+        u.IDU, 
+        u.Nombre,
+        p.IDPub,
+        (SELECT IDProd FROM Contribucion WHERE IDU = p.IDU ORDER BY Fecha DESC LIMIT 1) as IDProd,
+        
+        (SELECT Fecha FROM Contribucion WHERE IDU = p.IDU ORDER BY Fecha DESC LIMIT 1) as Fecha_Pub,
+        
+        COALESCE(SUM(rp.score_reac), 0) + COALESCE(SUM(cp.score_com), 0) as Puntaje_Total
+    FROM Usuario u
+    JOIN Publicacion p ON u.IDU = p.IDU
+    
+    LEFT JOIN ReaccionesPonderadas rp ON p.IDPub = rp.IDPub
+    LEFT JOIN ComentariosPonderados cp ON p.IDPub = cp.IDPub
+    
+    WHERE COALESCE(rp.score_reac, 0) + COALESCE(cp.score_com, 0) > 0
+    
+    GROUP BY u.IDU, u.Nombre, p.IDPub
+    ORDER BY Puntaje_Total DESC
+    LIMIT 5;
+    """
+    
+    top_posts = DatabaseConnector.execute_query(sql_top_influencers)
+
+    for post in top_posts:
+        influencer_id = post['IDU']
+        product_id = post['IDProd'] 
+        pub_date = post['Fecha_Pub']
+        pub_id = post['IDPub']
+
+        if not product_id:
+            continue
+            
+        sql_sales = """
+        SELECT 
+            SUM(CASE WHEN Fecha BETWEEN DATE_SUB(%s, INTERVAL 14 DAY) AND %s THEN Cantidad ELSE 0 END) as Ventas_Antes,
+            SUM(CASE WHEN Fecha BETWEEN %s AND DATE_ADD(%s, INTERVAL 14 DAY) THEN Cantidad ELSE 0 END) as Ventas_Despues
+        FROM Compra
+        WHERE IDProd = %s;
+        """
+        sales_data = DatabaseConnector.execute_query(sql_sales, (pub_date, pub_date, pub_date, pub_date, product_id))
+        
+        v_antes = sales_data[0]['Ventas_Antes'] or 0
+        v_despues = sales_data[0]['Ventas_Despues'] or 0
+        
+        if v_antes > 0:
+            incremento_pct = ((v_despues - v_antes) / v_antes) * 100
+        else:
+            incremento_pct = 100 if v_despues > 0 else 0
+
+        sql_conversion = """
+        SELECT 
+            (COUNT(DISTINCT c.IDUC) / NULLIF((SELECT COUNT(DISTINCT IDU) FROM Reaccionar WHERE IDPub = %s), 0)) * 100 as Tasa_Conversion
+        FROM Compra c
+        JOIN Reaccionar r ON c.IDUC = r.IDU
+        WHERE r.IDPub = %s 
+          AND c.IDProd = %s
+          AND c.Fecha >= r.Fecha; 
+        """
+        conv_data = DatabaseConnector.execute_query(sql_conversion, (pub_id, pub_id, product_id))
+        tasa_conv = conv_data[0]['Tasa_Conversion'] or 0.0
+
+        results.append({
+            "Influencer": post['Nombre'],
+            "Puntaje Impacto": float(post['Puntaje_Total']),
+            "Planta Promocionada (ID)": product_id,
+            "Fecha Publicación": pub_date,
+            "Ventas Antes (2sem)": v_antes,
+            "Ventas Después (2sem)": v_despues,
+            "Incremento Ventas %": round(incremento_pct, 2),
+            "Tasa Conversión %": round(tasa_conv, 2)
+        })
+
+    return results
+
+
+def find_sellers_with_irregular_pricing():
+    """q1 Encuentra vendedores con precios irregulares para el mismo producto."""
+    query = """
+SELECT 
+    distinct v1.IDUV AS Vendedor
+FROM Compra v1
+JOIN Compra v2 ON 
+    v1.IDUV = v2.IDUV    
+WHERE 
+    (v1.Precio >= v2.Precio * 1.3 OR v2.Precio >= v1.Precio * 1.3) and ABS(DATEDIFF(v1.Fecha, v2.Fecha)) <= 60
+;
+"""
+    return DatabaseConnector.execute_query(query)
+
+
+def find_polarized_sellers_ratings():
+    """q2 Encuentra vendedores con calificaciones polarizadas (muchos 5 y 1 estrellas)."""
+    query = """
+SELECT com.IDUV,
+COUNT(*) AS Total,
+SUM(CASE WHEN com.Puntuacion = 5 OR com.Puntuacion = 1 THEN 1 ELSE 0 END) AS Puntuaciones_Polarizadas,
+SUM(CASE WHEN com.Puntuacion IN (2, 3, 4) THEN 1 ELSE 0 END) AS Puntuaciones_Intermedias
+FROM Compra com
+WHERE com.Puntuacion IS NOT NULL
+GROUP BY com.IDUV
+HAVING Total * 0.85 <= Puntuaciones_Polarizadas AND Puntuaciones_Polarizadas*0.30 > Puntuaciones_Intermedias 
+;
+"""
+    return DatabaseConnector.execute_query(query)
+
+def find_sellers_with_exclusive_customers():
+    """q3 Encuentra vendedores cuyos compradores son casi exclusivos o exclusivos."""
+    query = """
+SELECT  
+    c.IDUV,
+    CASE 
+        WHEN cc.Vendedores_Diferentes = 1 THEN 'EXCLUSIVO'
+        WHEN cc.Vendedores_Diferentes = 2 THEN 'CASI_EXCLUSIVO'
+        ELSE 'NORMAL'
+    END AS Tipo_Comprador
+FROM Compra c
+JOIN (
+    SELECT 
+        IDUC,
+        COUNT(DISTINCT IDUV) AS Vendedores_Diferentes
+    FROM Compra
+    GROUP BY IDUC
+) as cc ON c.IDUC = cc.IDUC
+WHERE cc.Vendedores_Diferentes <= 2  
+;
+"""
     return DatabaseConnector.execute_query(query)

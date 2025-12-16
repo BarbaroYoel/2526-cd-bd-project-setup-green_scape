@@ -839,9 +839,6 @@ INSERT INTO Contribucion (IDProd, IDU, Fecha, Nota) VALUES
 (27, 28, '2023-08-07', 'Necesita mejor cuidado.'),
 (48, 9, '2023-07-20', 'Necesita mejor cuidado.'),
 (10, 18, '2023-11-06', 'Excelente condición de la planta.'),
-(46, 18, '2024-01-06', 'Excelente condición de la planta.'),
-(46, 18, '2024-01-07', 'Excelente condición de la planta.'),
-
 (13, 1, '2023-06-09', 'Necesita mejor cuidado.'),
 (20, 11, '2024-01-15', 'Gran aporte al jardín comunitario.'),
 (23, 40, '2023-10-29', 'Necesita mejor cuidado.'),

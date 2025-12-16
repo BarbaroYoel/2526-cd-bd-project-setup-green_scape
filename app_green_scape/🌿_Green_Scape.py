@@ -2,7 +2,7 @@ import streamlit as st
 st.set_page_config(page_title="GreenScape", page_icon="🌿", layout="wide")
 
 
-st.title("🌿 GreenScape Analytics")
+st.title("🌿 GreenScape 🌿")
 st.markdown("""
         ### Plataforma de Inteligencia de Datos
         

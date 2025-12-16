@@ -1,4 +1,3 @@
-# utils/setup_trigger.py
 import sys
 from utils.database_connector import DatabaseConnector
 

@@ -22,6 +22,11 @@ query_options = {
     
     "l: Usuarios 'Raritos' (Compra vs. Gusto)": "query_l_raritos_compra_vs_gusto",
     "m: Usuarios sin Contenido Multimedia en Pub.": "query_m_users_without_multimedia",
+    "p: Influencers y su impacto en Ventas": "analyze_influencers_impact",
+
+    "q1: Vendedores con Precios Irregulares": "find_sellers_with_irregular_pricing",
+    "q2: Vendedores con Calificaciones Polarizadas ": "find_polarized_sellers_ratings",
+    "q3: Vendedores con Clientes Exclusivos/Casi Exclusivos": "find_sellers_with_exclusive_customers",
 }
 
 selected_query = st.selectbox("Selecciona una consulta:", list(query_options.keys()))
