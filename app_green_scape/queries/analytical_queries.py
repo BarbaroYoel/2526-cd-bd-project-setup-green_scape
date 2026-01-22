@@ -3,7 +3,7 @@ from utils.database_connector import DatabaseConnector
 def get_all_products():
     """a: Listar todos los productos disponibles"""
     query = """
-    SELECT IDProd, Nombre, Descripcion, Precio
+    SELECT *
     FROM Producto
     ORDER BY Nombre;
     """
@@ -12,12 +12,15 @@ def get_all_products():
 def query_b_top_reactions():
     """b: Publicaciones con mayor cantidad de Reacciones"""
     query = """
-SELECT usu.Nombre ,pub.Texto, Count(*) as Cantidad_de_Reacciones
-FROM Reaccionar rcc
-JOIN Publicacion pub ON rcc.IDPub = pub.IDPub
-JOIN Usuario usu ON pub.IDU = usu.IDU
-GROUP BY rcc.IDPub, pub.Texto, usu.Nombre
-ORDER BY Cantidad_de_Reacciones DESC;
+SELECT 
+    p.Texto AS Publicacion, 
+    u.Nombre AS Autor, 
+    COUNT(r.IDPub) AS Total_Reacciones
+FROM Publicacion p
+JOIN Usuario u ON p.IDU = u.IDU
+LEFT JOIN Reaccionar r ON p.IDPub = r.IDPub
+GROUP BY p.IDPub, u.Nombre
+ORDER BY Total_Reacciones DESC ;
 """
     return DatabaseConnector.execute_query(query)
 
@@ -34,19 +37,22 @@ ORDER BY Likes DESC;
 def query_d_last_activity_6m():
     """d: Fecha de última actividad de Usuario (Reacción o Contribución)"""
     query = """
-SELECT usu.IDU, usu.Nombre, usu.DireccionParticular,
-MAX(
-    CASE
-        WHEN rcc.Fecha >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH) OR ctr.Fecha >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
-        THEN GREATEST(COALESCE(rcc.Fecha, '1223-01-01'), COALESCE(ctr.Fecha, '1223-01-01'))
-        ELSE NULL
-    END
-) AS Fecha_Ultima_Actividad
-FROM Usuario usu
-LEFT JOIN Reaccionar rcc ON usu.IDU = rcc.IDU
-LEFT JOIN Contribucion ctr ON usu.IDU = ctr.IDU
-GROUP BY usu.IDU, usu.Nombre, usu.DireccionParticular
-ORDER BY Fecha_Ultima_Actividad DESC;
+SELECT 
+    u.Nombre, 
+    u.Email,
+    u.DireccionParticular,
+    MAX(CASE 
+        WHEN actividad.Fecha >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH) THEN actividad.Fecha 
+        ELSE NULL 
+    END) AS Ultima_Actividad_Reciente
+FROM Usuario u
+LEFT JOIN (
+    SELECT IDU, Fecha FROM Contribucion
+    UNION ALL
+    SELECT IDU, Fecha FROM Reaccionar
+) AS actividad ON u.IDU = actividad.IDU
+GROUP BY u.IDU, u.Nombre, u.Email, u.DireccionParticular
+ORDER BY Ultima_Actividad_Reciente DESC;
 """
     return DatabaseConnector.execute_query(query)
 
@@ -68,42 +74,24 @@ ORDER BY Total_Reacciones DESC;
 def query_f_consecutive_contributions():
     """f: Plantas con Contribuciones en Meses Consecutivos (por cualquier usuario)."""
     query = """
-WITH MesesDeContribucion AS (
-    SELECT DISTINCT
-        ctr.IDProd,
-        plt.NombreComun,
-        YEAR(ctr.Fecha) AS Anio,
-        MONTH(ctr.Fecha) AS Mes
-    FROM Contribucion AS ctr
-    JOIN Planta AS plt ON ctr.IDProd = plt.IDProd
-),
-MesesRankeados AS (
-    SELECT
-        NombreComun,
-        (Anio * 12) + Mes AS Mes_Secuencial_Actual,
-        LAG((Anio * 12) + Mes, 1) OVER (PARTITION BY IDProd ORDER BY Anio, Mes) AS Mes_Secuencial_Anterior
-    FROM MesesDeContribucion
-)
-SELECT DISTINCT
-    NombreComun
-FROM MesesRankeados
-WHERE 
-    Mes_Secuencial_Actual = Mes_Secuencial_Anterior + 1
-ORDER BY NombreComun;
-"""
+    WITH MesesDeContribucion AS (
+        SELECT DISTINCT IDProd, YEAR(Fecha) AS Anio, MONTH(Fecha) AS Mes
+        FROM Contribucion
+    ),
+    CalculoConsecutivo AS (
+        SELECT IDProd, Anio, Mes,
+               LAG(Anio) OVER (PARTITION BY IDProd ORDER BY Anio, Mes) AS Anio_Ant,
+               LAG(Mes) OVER (PARTITION BY IDProd ORDER BY Anio, Mes) AS Mes_Ant
+        FROM MesesDeContribucion
+    )
+    SELECT DISTINCT p.NombreComun
+    FROM CalculoConsecutivo c
+    JOIN Planta p ON c.IDProd = p.IDProd
+    WHERE (c.Anio = c.Anio_Ant AND c.Mes = c.Mes_Ant + 1)
+       OR (c.Anio = c.Anio_Ant + 1 AND c.Mes = 1 AND c.Mes_Ant = 12)
+    ORDER BY p.NombreComun;
+    """
     return DatabaseConnector.execute_query(query)
-
-# SELECT 
-#     plt.NombreComun,
-#     YEAR(ctr.Fecha) AS Anio,
-#     MONTH(ctr.Fecha) AS Mes,
-#     COUNT(*) AS Total_Contribuciones_En_Mes
-# FROM Contribucion AS ctr
-# JOIN Planta AS plt ON ctr.IDProd = plt.IDProd
-# GROUP BY plt.NombreComun, Anio, Mes
-# ORDER BY plt.NombreComun, Anio, Mes;
-
-
 
 def get_monthly_activity_average():
     """g: Promedio de actividad mensual"""
@@ -136,26 +124,15 @@ LIMIT 10;
 def query_h_age_distribution():
     """h: Distribución de Usuarios por Rango de Edad"""
     query = """
-SELECT
-(CASE
-    WHEN  YEAR(CURDATE()) - YEAR(usu.FechaDeNacimiento) < 11 THEN "wtf"
-    WHEN YEAR(CURDATE()) - YEAR(usu.FechaDeNacimiento) BETWEEN 11 AND 20 THEN "11-20"
-    WHEN YEAR(CURDATE()) - YEAR(usu.FechaDeNacimiento) BETWEEN 21 AND 30 THEN "21-30"
-    WHEN YEAR(CURDATE()) - YEAR(usu.FechaDeNacimiento) BETWEEN 31 AND 40 THEN "31-40"
-    WHEN YEAR(CURDATE()) - YEAR(usu.FechaDeNacimiento) BETWEEN 41 AND 50 THEN "41-50"
-    WHEN YEAR(CURDATE()) - YEAR(usu.FechaDeNacimiento) BETWEEN 51 AND 60 THEN "51-60"
-    WHEN YEAR(CURDATE()) - YEAR(usu.FechaDeNacimiento) BETWEEN 61 AND 70 THEN "61-70"
-    WHEN YEAR(CURDATE()) - YEAR(usu.FechaDeNacimiento) BETWEEN 71 AND 80 THEN "71-80"
-    WHEN YEAR(CURDATE()) - YEAR(usu.FechaDeNacimiento) BETWEEN 81 AND 90 THEN "81-90"
-    WHEN YEAR(CURDATE()) - YEAR(usu.FechaDeNacimiento) BETWEEN 91 AND 100 THEN "91-100"
-    WHEN YEAR(CURDATE()) - YEAR(usu.FechaDeNacimiento) > 100 THEN "en mis tiempos..."
-ELSE "Revisate Eso"
-END) AS Rango_de_Edad,
-COUNT(*) AS Cant_de_Usuarios,
-(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM Usuario)) AS Porcentaje
-FROM Usuario usu
-GROUP BY Rango_de_Edad
-ORDER BY Rango_de_Edad;
+SELECT 
+    CONCAT(FLOOR((TIMESTAMPDIFF(YEAR, FechaDeNacimiento, CURDATE()) - 1) / 10) * 10 + 1, 
+           '-', 
+           FLOOR((TIMESTAMPDIFF(YEAR,FechaDeNacimiento, CURDATE()) - 1) / 10) * 10 + 10) AS rango_edad,
+    COUNT(*) AS cantidad_usuarios,
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM Usuario), 2) AS porcentaje
+FROM Usuario
+GROUP BY rango_edad
+ORDER BY MIN(FechaDeNacimiento) DESC;
 """
     return DatabaseConnector.execute_query(query)
 
@@ -199,45 +176,32 @@ ORDER BY IDProd;
 def contribution_trends_by_climate():
     """j: Tendencias de Contribución por Clima"""
     query="""  
-SELECT 
-    ranking.Tipo as Tipo_Clima,
-    IFNULL(contrib.Total_Contribuciones, 0) as Total_Contribuciones,
-    IFNULL(contrib.Contribuciones_con_Fotos, 0) as Contribuciones_Fotos,
-    IFNULL(contrib.Contribuciones_con_Videos, 0) as Contribuciones_Videos,
-    IFNULL(contrib.Usuarios_Contribuyentes, 0) as Usuarios_Contribuyentes,
-    ranking.NombreComun as Planta_Mas_Popular,
-    ranking.Gustado as Me_Gusta
-FROM (
-    SELECT *
-    FROM (
+    WITH PopularidadPorClima AS (
         SELECT 
-            c.Tipo,
+            cl.Tipo AS TipoClima,
             p.NombreComun,
-            COUNT(g.IDU) as Gustado,
-            ROW_NUMBER() OVER (PARTITION BY c.Tipo ORDER BY COUNT(g.IDU) DESC) as rn
-        FROM Gustar g
-        JOIN Planta p ON g.IDProd = p.IDProd
-        JOIN Clima c ON p.IDC = c.IDC
-        GROUP BY c.Tipo, p.NombreComun
-    ) sub1
-    WHERE rn = 1
-) ranking
-JOIN (
+            COUNT(c.IDProd) AS Total_Contribuciones
+        FROM Clima cl
+        JOIN Planta p ON cl.IDC = p.IDC
+        JOIN Contribucion c ON p.IDProd = c.IDProd
+        GROUP BY cl.Tipo, p.NombreComun
+    ),
+    RankingClima AS (
+        SELECT 
+            TipoClima,
+            NombreComun,
+            Total_Contribuciones,
+            RANK() OVER (PARTITION BY TipoClima ORDER BY Total_Contribuciones DESC) AS Posicion
+        FROM PopularidadPorClima
+    )
     SELECT 
-        c.Tipo,
-        COUNT(*) as Total_Contribuciones,
-        COUNT(DISTINCT cf.IDF) as Contribuciones_con_Fotos,
-        COUNT(DISTINCT cv.IDV) as Contribuciones_con_Videos,
-        COUNT(DISTINCT cont.IDU) as Usuarios_Contribuyentes
-    FROM Contribucion cont
-    JOIN Planta p ON cont.IDProd = p.IDProd
-    JOIN Clima c ON p.IDC = c.IDC
-    LEFT JOIN Contribucion_Foto cf ON cont.IDProd = cf.IDProd AND cont.Fecha = cf.Fecha
-    LEFT JOIN Contribucion_Video cv ON cont.IDProd = cv.IDProd AND cont.Fecha = cv.Fecha
-    GROUP BY c.Tipo
-) contrib ON ranking.Tipo = contrib.Tipo
-ORDER BY ranking.Tipo;  
-"""
+        TipoClima AS Clima, 
+        NombreComun AS Planta_Mas_Popular, 
+        Total_Contribuciones
+    FROM RankingClima
+    WHERE Posicion = 1
+    ORDER BY Total_Contribuciones DESC;
+    """
     return DatabaseConnector.execute_query(query)
 
 def get_category_preference_changes():
@@ -277,62 +241,65 @@ WHERE T1.Ranking = 1 AND T2.Ranking = 1 AND T1.Categoria <> T2.Categoria
 ORDER BY T1.IDU, T1.Anio;
     """
     return DatabaseConnector.execute_query(query)
-
-
-def top_rated_sellers():
-    """n: Vendedores Mejor Valorados (Usando la tabla Compra)"""
-    query="""
-SELECT 
-    u.Nombre, 
-    u.DireccionParticular, 
-    u.Email, 
-    AVG(c.Puntuacion) AS Calificacion_Promedio, 
-    SUM(c.Cantidad) AS total_productos_vendidos
-FROM Compra AS c
-JOIN Usuario AS u ON u.IDU = c.IDUV
-WHERE c.Puntuacion IS NOT NULL
-GROUP BY 
-    u.Nombre, 
-    u.DireccionParticular, 
-    u.Email
-ORDER BY 
-    Calificacion_Promedio DESC
-LIMIT 5;
-"""
-    return DatabaseConnector.execute_query(query)
-
-
 def query_l_raritos_compra_vs_gusto():
     """l: Usuarios que Compran Productos que No les Gustan ('Raritos')"""
     query = """
-SELECT 
-    usu.IDU,
-    usu.Nombre,
-    SUM(CASE WHEN gus.IDProd IS NULL THEN 1 ELSE 0 END) AS Compras_No_Gustadas,
-    SUM(CASE WHEN gus.IDProd IS NOT NULL THEN 1 ELSE 0 END) AS Compras_Gustadas
-FROM Usuario usu
-JOIN Compra com ON com.IDUC = usu.IDU  -- Compras realizadas por el usuario
-LEFT JOIN Gustar gus ON gus.IDU = usu.IDU AND gus.IDProd = com.IDProd -- Gustos
-GROUP BY usu.IDU, usu.Nombre
-HAVING Compras_No_Gustadas > Compras_Gustadas
-ORDER BY Compras_No_Gustadas DESC;
-"""
+    WITH Compras_Categorizadas AS (
+        SELECT 
+            c.IDUC AS IDU,
+            COUNT(CASE WHEN g.IDProd IS NULL THEN 1 END) AS Compras_Sin_Gusto,
+            COUNT(CASE WHEN g.IDProd IS NOT NULL THEN 1 END) AS Compras_Con_Gusto
+        FROM Compra c
+        LEFT JOIN Gustar g ON c.IDUC = g.IDU AND c.IDProd = g.IDProd
+        GROUP BY c.IDUC
+    )
+    SELECT 
+        u.Nombre, 
+        u.Email, 
+        cc.Compras_Sin_Gusto, 
+        cc.Compras_Con_Gusto
+    FROM Compras_Categorizadas cc
+    JOIN Usuario u ON cc.IDU = u.IDU
+    WHERE cc.Compras_Sin_Gusto > cc.Compras_Con_Gusto
+    ORDER BY cc.Compras_Sin_Gusto DESC;
+    """
     return DatabaseConnector.execute_query(query)
+
 
 def query_m_users_without_multimedia():
     """m: Usuarios sin Publicaciones con Contenido Multimedia (Foto o Video)"""
     query = """
-SELECT usu.IDU, usu.Nombre
-FROM Usuario usu
-WHERE usu.IDU NOT IN (
-    SELECT DISTINCT pub.IDU
-    FROM Publicacion pub
-    LEFT JOIN Tener_Foto tf ON pub.IDPub = tf.IDPub
-    WHERE tf.IDF IS NOT NULL OR pub.IDV IS NOT NULL
-)
-ORDER BY usu.IDU;
+    SELECT usu.IDU, usu.Nombre
+    FROM Usuario usu
+    WHERE usu.IDU NOT IN (
+        SELECT DISTINCT pub.IDU
+        FROM Publicacion pub
+        LEFT JOIN Tener_Foto tf ON pub.IDPub = tf.IDPub
+        WHERE tf.IDF IS NOT NULL OR pub.IDV IS NOT NULL
+    )
+    ORDER BY usu.IDU;
 """
     return DatabaseConnector.execute_query(query)
+
+def top_rated_sellers():
+    """n: Vendedores Mejor Valorados (Usando la tabla Compra)"""
+    query="""
+        SELECT 
+        u.Nombre, 
+        u.Email, 
+        u.DireccionParticular,
+        COUNT(c.IDProd) AS Total_Productos_Vendidos,
+        ROUND(AVG(c.Puntuacion), 2) AS Calificacion_Promedio
+    FROM Usuario u
+    JOIN Compra c ON u.IDU = c.IDUV
+    WHERE c.Puntuacion IS NOT NULL
+    GROUP BY u.IDU, u.Nombre, u.Email, u.DireccionParticular
+    ORDER BY Calificacion_Promedio DESC, Total_Productos_Vendidos DESC
+    LIMIT 5;
+    """
+    return DatabaseConnector.execute_query(query)
+
+
 
 def analyze_influencers_impact():
     """
@@ -430,55 +397,58 @@ def analyze_influencers_impact():
     return results
 
 
-def find_sellers_with_irregular_pricing():
-    """q1 Encuentra vendedores con precios irregulares para el mismo producto."""
+def get_seller_anomaly_report():
+    """q: Detección de patrones de comportamiento anómalo en vendedores"""
     query = """
-SELECT 
-    distinct v1.IDUV AS Vendedor
-FROM Compra v1
-JOIN Compra v2 ON 
-    v1.IDUV = v2.IDUV    
-WHERE 
-    (v1.Precio >= v2.Precio * 1.3 OR v2.Precio >= v1.Precio * 1.3) and ABS(DATEDIFF(v1.Fecha, v2.Fecha)) <= 60
-;
-"""
-    return DatabaseConnector.execute_query(query)
-
-
-def find_polarized_sellers_ratings():
-    """q2 Encuentra vendedores con calificaciones polarizadas (muchos 5 y 1 estrellas)."""
-    query = """
-SELECT com.IDUV,
-COUNT(*) AS Total,
-SUM(CASE WHEN com.Puntuacion = 5 OR com.Puntuacion = 1 THEN 1 ELSE 0 END) AS Puntuaciones_Polarizadas,
-SUM(CASE WHEN com.Puntuacion IN (2, 3, 4) THEN 1 ELSE 0 END) AS Puntuaciones_Intermedias
-FROM Compra com
-WHERE com.Puntuacion IS NOT NULL
-GROUP BY com.IDUV
-HAVING Total * 0.85 <= Puntuaciones_Polarizadas AND Puntuaciones_Polarizadas*0.30 > Puntuaciones_Intermedias 
-;
-"""
-    return DatabaseConnector.execute_query(query)
-
-def find_sellers_with_exclusive_customers():
-    """q3 Encuentra vendedores cuyos compradores son casi exclusivos o exclusivos."""
-    query = """
-SELECT  
-    c.IDUV,
-    CASE 
-        WHEN cc.Vendedores_Diferentes = 1 THEN 'EXCLUSIVO'
-        WHEN cc.Vendedores_Diferentes = 2 THEN 'CASI_EXCLUSIVO'
-        ELSE 'NORMAL'
-    END AS Tipo_Comprador
-FROM Compra c
-JOIN (
+    WITH Sospecha_Precios AS (
+        SELECT IDUV, 'Precios Inestables (>30%)' AS Evidencia, 10 AS Puntos
+        FROM Compra
+        GROUP BY IDUV, IDProd
+        HAVING (MAX(Precio) - MIN(Precio)) / NULLIF(MIN(Precio), 0) > 0.3
+    ),
+    Sospecha_Reviews AS (
+        SELECT IDUV, 'Ratings Polarizados (1 y 5)' AS Evidencia, 30 AS Puntos
+        FROM Compra
+        WHERE Puntuacion IS NOT NULL
+        GROUP BY IDUV
+        HAVING SUM(CASE WHEN Puntuacion IN (1, 5) THEN 1 ELSE 0 END) / COUNT(*) > 0.8
+        AND COUNT(*) > 5
+    ),
+    Sospecha_Clientes AS (
+        SELECT v.IDUV, 'Clientes Exclusivos (Posible Manipulación)' AS Evidencia, 40 AS Puntos
+        FROM Compra v
+        JOIN (
+            SELECT IDUC
+            FROM Compra
+            GROUP BY IDUC
+            HAVING COUNT(DISTINCT IDUV) = 1
+        ) c_excl ON v.IDUC = c_excl.IDUC
+        GROUP BY v.IDUV
+        HAVING COUNT(DISTINCT v.IDUC) / (SELECT COUNT(DISTINCT IDUC) FROM Compra WHERE IDUV = v.IDUV) > 0.5
+    ),
+    Sospecha_Volumen AS (
+        SELECT v.IDUV, 'Volumen Anómalo (3x Promedio)' AS Evidencia, 20 AS Puntos
+        FROM Compra v
+        JOIN (
+            SELECT IDProd, COUNT(*) as Promedio_Ventas
+            FROM Compra
+            GROUP BY IDProd
+        ) promedios ON v.IDProd = promedios.IDProd
+        GROUP BY v.IDUV, v.IDProd
+        -- CORRECCIÓN: Usamos MAX() para que SQL reconozca la columna en el HAVING
+        HAVING COUNT(*) > (MAX(promedios.Promedio_Ventas) * 3)
+    )
     SELECT 
-        IDUC,
-        COUNT(DISTINCT IDUV) AS Vendedores_Diferentes
-    FROM Compra
-    GROUP BY IDUC
-) as cc ON c.IDUC = cc.IDUC
-WHERE cc.Vendedores_Diferentes <= 2  
-;
-"""
+        u.Nombre AS Vendedor,
+        u.Email,
+        (COALESCE(p.Puntos, 0) + COALESCE(r.Puntos, 0) + COALESCE(c.Puntos, 0) + COALESCE(vol.Puntos, 0)) AS Indice_Sospecha,
+        CONCAT_WS(' | ', p.Evidencia, r.Evidencia, c.Evidencia, vol.Evidencia) AS Evidencias_Detectadas
+    FROM Usuario u
+    LEFT JOIN Sospecha_Precios p ON u.IDU = p.IDUV
+    LEFT JOIN Sospecha_Reviews r ON u.IDU = r.IDUV
+    LEFT JOIN Sospecha_Clientes c ON u.IDU = c.IDUV
+    LEFT JOIN Sospecha_Volumen vol ON u.IDU = vol.IDUV
+    WHERE p.IDUV IS NOT NULL OR r.IDUV IS NOT NULL OR c.IDUV IS NOT NULL OR vol.IDUV IS NOT NULL
+    ORDER BY Indice_Sospecha DESC;
+    """
     return DatabaseConnector.execute_query(query)

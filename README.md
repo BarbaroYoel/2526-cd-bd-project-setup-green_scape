@@ -44,7 +44,7 @@ docker-compose up -d
 
 ```bash
 cd app_green_scape
-python utils/setup_master.py
+python -m utils.setup_master
 ```
 
 Este script ejecuta automáticamente:
