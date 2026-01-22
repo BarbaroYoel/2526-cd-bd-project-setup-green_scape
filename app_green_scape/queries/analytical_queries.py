@@ -27,10 +27,27 @@ ORDER BY Total_Reacciones DESC ;
 def query_c_likes_by_product():
     """c: Conteo de 'Me Gusta' por producto"""
     query = """
-SELECT gus.IDProd, COUNT(*) AS Likes
-FROM Gustar gus
-GROUP BY gus.IDProd
-ORDER BY Likes DESC;
+SELECT 
+    c.IDProd,
+    p.NombreComun AS Nombre_Planta,
+    COUNT( CASE 
+        WHEN rcc.Tipo IN ('Me gusta', 'Me encanta', 'Me divierte', 'Me asombra') 
+        THEN rcc.IDU 
+    END) AS reacciones_positivas,
+    COUNT( rcc.IDU) AS total_reacciones
+FROM Contribucion c
+JOIN Planta p ON c.IDProd = p.IDProd
+JOIN Contribucion_Foto cf ON c.IDProd = cf.IDProd AND c.Fecha = cf.Fecha
+JOIN Tener_Foto tf ON tf.IDF = cf.IDF
+JOIN Publicacion pub_foto ON tf.IDPub = pub_foto.IDPub
+JOIN Contribucion_Video cv ON c.IDProd = cv.IDProd AND c.Fecha = cv.Fecha
+JOIN Publicacion pub_video ON cv.IDV = pub_video.IDV
+JOIN Reaccionar rcc ON (
+    rcc.IDPub IN (pub_foto.IDPub, pub_video.IDPub)
+)
+GROUP BY c.IDProd, p.NombreComun
+ORDER BY reacciones_positivas DESC
+LIMIT 3;
 """
     return DatabaseConnector.execute_query(query)
 
@@ -96,26 +113,17 @@ def query_f_consecutive_contributions():
 def get_monthly_activity_average():
     """g: Promedio de actividad mensual"""
     query = """
-    WITH ActivityPerMonth AS (
-    SELECT
-        u.IDU,
-        u.Nombre,
-        YEAR(c.Fecha) AS Anio,
-        MONTH(c.Fecha) AS Mes,
-          (COUNT(DISTINCT cf.IDF) + COUNT(DISTINCT cv.IDV)) AS Total_Multimedia
-    FROM Usuario u
-    JOIN Contribucion c ON u.IDU = c.IDU
-    LEFT JOIN Contribucion_Foto cf ON c.IDProd = cf.IDProd AND c.Fecha = cf.Fecha
-    LEFT JOIN Contribucion_Video cv ON c.IDProd = cv.IDProd AND c.Fecha = cv.Fecha
-    WHERE c.Fecha >= DATE_SUB(CURDATE(), INTERVAL 2 YEAR)
-    GROUP BY u.IDU, u.Nombre, YEAR(c.Fecha), MONTH(c.Fecha)
-)
 SELECT
-    IDU,
-    Nombre,
-    AVG(Total_Multimedia) AS Promedio_Mensual_Multimedia
-FROM ActivityPerMonth
-GROUP BY IDU, Nombre
+    u.IDU,
+    u.Nombre,
+    COUNT(DISTINCT cf.IDF) + COUNT(DISTINCT cv.IDV) AS Total_Multimedia_Ultimo_Anio,
+    (COUNT(DISTINCT cf.IDF) + COUNT(DISTINCT cv.IDV)) / 12 AS Promedio_Mensual_Multimedia
+FROM Usuario u
+JOIN Contribucion c ON u.IDU = c.IDU
+JOIN Contribucion_Foto cf ON c.IDProd = cf.IDProd AND c.Fecha = cf.Fecha
+JOIN Contribucion_Video cv ON c.IDProd = cv.IDProd AND c.Fecha = cv.Fecha
+WHERE year(c.Fecha) = year(curdate())
+GROUP BY u.IDU, u.Nombre
 ORDER BY Promedio_Mensual_Multimedia DESC
 LIMIT 10;
     """
@@ -139,37 +147,41 @@ ORDER BY MIN(FechaDeNacimiento) DESC;
 def query_i_stable_purchase_patterns():
     """i: Productos que no han mostrado un incremento en sus ventas mes a mes durante el último año."""
     query = """
-WITH VentasMensuales AS (
+ SELECT 
+    v1.IDProd,
+    v1.Nombre,
+    v1.Anio,
+    v1.Mes,
+    v1.Total_Vendido AS Ventas_Mes_Actual,
+    v2.Total_Vendido AS Ventas_Mes_Anterior
+FROM (
     SELECT
         c.IDProd,
-        p.Nombre AS NombrePlanta,
+        p.Nombre,
         YEAR(c.Fecha) AS Anio,
         MONTH(c.Fecha) AS Mes,
         SUM(c.Cantidad) AS Total_Vendido
     FROM Compra c
     JOIN Producto p ON c.IDProd = p.IDProd
-    WHERE c.Fecha BETWEEN DATE_SUB(CURDATE(), INTERVAL 48 MONTH) AND CURDATE()
-    GROUP BY c.IDProd, p.Nombre, Anio, Mes
-),
-ComparacionMensual AS (
+    WHERE YEAR(c.Fecha) = YEAR(CURDATE())-1
+    GROUP BY c.IDProd, p.Nombre, YEAR(c.Fecha), MONTH(c.Fecha)
+) v1
+LEFT JOIN (
     SELECT
-        IDProd,
-        NombrePlanta,
-        Anio,
-        Mes,
-        Total_Vendido,
-        LAG(Total_Vendido, 1, 0) OVER (PARTITION BY IDProd ORDER BY Anio, Mes) AS Venta_Mes_Anterior
-    FROM VentasMensuales
-)
--- 3. Identificamos los productos que NO han tenido un incremento constante.
-SELECT DISTINCT
-    IDProd,
-    NombrePlanta
-FROM ComparacionMensual
--- Buscamos productos que en AL MENOS un mes, la venta actual NO FUE mayor que la anterior (<=).
--- Si al menos un mes no creció, el patrón no es de "incremento constante".
-WHERE Total_Vendido <= Venta_Mes_Anterior 
-ORDER BY IDProd;
+        c.IDProd,
+        YEAR(c.Fecha) AS Anio,
+        MONTH(c.Fecha) AS Mes,
+        SUM(c.Cantidad) AS Total_Vendido
+    FROM Compra c
+    WHERE YEAR(c.Fecha) = YEAR(CURDATE())-1
+    GROUP BY c.IDProd, YEAR(c.Fecha), MONTH(c.Fecha)
+) v2 ON v1.IDProd = v2.IDProd 
+    AND (
+        (v1.Anio = v2.Anio AND v1.Mes = v2.Mes + 1) 
+        OR (v1.Anio = v2.Anio + 1 AND v1.Mes = 1 AND v2.Mes = 12)  
+    )
+WHERE v1.Total_Vendido <= v2.Total_Vendido
+ORDER BY v1.IDProd, v1.Anio, v1.Mes;
 """
     return DatabaseConnector.execute_query(query)
 
@@ -207,38 +219,38 @@ def contribution_trends_by_climate():
 def get_category_preference_changes():
     """k: Cambio de preferencias de categorías"""
     query="""
-WITH ContribucionesPorAnio AS (
+WITH CategoriaFavoritaAnual AS (
     SELECT 
         u.IDU,
         u.Nombre,
         YEAR(c.Fecha) AS Anio,
         p.Categoria,
-        COUNT(*) AS Total_Por_Categoria
+        COUNT(*) AS Contribuciones,
+        
+        ROW_NUMBER() OVER (
+            PARTITION BY u.IDU, YEAR(c.Fecha) 
+            ORDER BY COUNT(*) DESC
+        ) AS Posicion
     FROM Usuario u
     JOIN Contribucion c ON u.IDU = c.IDU
     JOIN Planta p ON c.IDProd = p.IDProd
     GROUP BY u.IDU, u.Nombre, YEAR(c.Fecha), p.Categoria
-),
-CategoriaFavorita AS (
-    SELECT 
-        IDU,
-        Nombre,
-        Anio,
-        Categoria,
-        ROW_NUMBER() OVER(PARTITION BY IDU, Anio ORDER BY Total_Por_Categoria DESC) as Ranking
-    FROM ContribucionesPorAnio
 )
 SELECT 
-    T1.IDU,
-    T1.Nombre,
-    T1.Anio AS Anio_Inicial,
-    T1.Categoria AS Categoria_Inicial,
-    T2.Anio AS Anio_Final,
-    T2.Categoria AS Categoria_Final
-FROM CategoriaFavorita T1
-JOIN CategoriaFavorita T2 ON T1.IDU = T2.IDU AND T1.Anio < T2.Anio
-WHERE T1.Ranking = 1 AND T2.Ranking = 1 AND T1.Categoria <> T2.Categoria
-ORDER BY T1.IDU, T1.Anio;
+    a.IDU,
+    a.Nombre,
+    a.Anio AS Anio_Anterior,
+    a.Categoria AS Categoria_Anterior,
+    b.Anio AS Anio_Actual, 
+    b.Categoria AS Categoria_Actual
+FROM CategoriaFavoritaAnual a
+JOIN CategoriaFavoritaAnual b 
+    ON a.IDU = b.IDU 
+    AND a.Anio = b.Anio - 1  
+    AND a.Posicion = 1 
+    AND b.Posicion = 1       
+    AND a.Categoria <> b.Categoria  
+ORDER BY a.IDU, a.Anio;
     """
     return DatabaseConnector.execute_query(query)
 def query_l_raritos_compra_vs_gusto():
@@ -269,15 +281,15 @@ def query_l_raritos_compra_vs_gusto():
 def query_m_users_without_multimedia():
     """m: Usuarios sin Publicaciones con Contenido Multimedia (Foto o Video)"""
     query = """
-    SELECT usu.IDU, usu.Nombre
-    FROM Usuario usu
-    WHERE usu.IDU NOT IN (
-        SELECT DISTINCT pub.IDU
-        FROM Publicacion pub
-        LEFT JOIN Tener_Foto tf ON pub.IDPub = tf.IDPub
-        WHERE tf.IDF IS NOT NULL OR pub.IDV IS NOT NULL
-    )
-    ORDER BY usu.IDU;
+SELECT usu.IDU, usu.Nombre
+FROM Usuario usu
+WHERE usu.IDU NOT IN (
+    SELECT DISTINCT pub.IDU
+    FROM Publicacion pub
+    LEFT JOIN Tener_Foto tf ON pub.IDPub = tf.IDPub
+    WHERE tf.IDF IS NOT NULL OR pub.IDV IS NOT NULL
+)
+ORDER BY usu.IDU;
 """
     return DatabaseConnector.execute_query(query)
 
@@ -302,98 +314,190 @@ def top_rated_sellers():
 
 
 def analyze_influencers_impact():
-    """
-    p) Análisis de influencers: Top 5, sus plantas, impacto en ventas y conversión.
-    """
     results = []
-
+    
+    # 1. Top 5 influencers
     sql_top_influencers = """
-    WITH ReaccionesPonderadas AS (
-        SELECT IDPub, 
-               SUM(CASE 
-                   WHEN Tipo = 'me gusta' THEN 1 
-                   WHEN Tipo = 'me encanta' THEN 2 
-                   WHEN Tipo = 'me asombra' THEN 1.5 
-                   ELSE 0 END) as score_reac
-        FROM Reaccionar GROUP BY IDPub
-    ),
-    ComentariosPonderados AS (
-        SELECT IDPub, COUNT(*) * 2 as score_com
-        FROM Comentar GROUP BY IDPub
-    )
     SELECT 
-        u.IDU, 
+        u.IDU,
         u.Nombre,
-        p.IDPub,
-        (SELECT IDProd FROM Contribucion WHERE IDU = p.IDU ORDER BY Fecha DESC LIMIT 1) as IDProd,
-        
-        (SELECT Fecha FROM Contribucion WHERE IDU = p.IDU ORDER BY Fecha DESC LIMIT 1) as Fecha_Pub,
-        
-        COALESCE(SUM(rp.score_reac), 0) + COALESCE(SUM(cp.score_com), 0) as Puntaje_Total
+        SUM(
+            CASE 
+                WHEN r.Tipo = 'Me gusta' THEN 1 
+                WHEN r.Tipo = 'Me encanta' THEN 2 
+                WHEN r.Tipo = 'Me asombra' THEN 1.5 
+                ELSE 0 
+            END
+        ) + (COUNT(c.IDPub) * 2) as Puntaje_Total
     FROM Usuario u
     JOIN Publicacion p ON u.IDU = p.IDU
-    
-    LEFT JOIN ReaccionesPonderadas rp ON p.IDPub = rp.IDPub
-    LEFT JOIN ComentariosPonderados cp ON p.IDPub = cp.IDPub
-    
-    WHERE COALESCE(rp.score_reac, 0) + COALESCE(cp.score_com, 0) > 0
-    
-    GROUP BY u.IDU, u.Nombre, p.IDPub
+    LEFT JOIN Reaccionar r ON p.IDPub = r.IDPub
+    LEFT JOIN Comentar c ON p.IDPub = c.IDPub
+    GROUP BY u.IDU, u.Nombre
+    HAVING Puntaje_Total > 0
     ORDER BY Puntaje_Total DESC
     LIMIT 5;
     """
     
-    top_posts = DatabaseConnector.execute_query(sql_top_influencers)
-
-    for post in top_posts:
-        influencer_id = post['IDU']
-        product_id = post['IDProd'] 
-        pub_date = post['Fecha_Pub']
-        pub_id = post['IDPub']
-
-        if not product_id:
+    influencers = DatabaseConnector.execute_query(sql_top_influencers)
+    
+    for inf in influencers:
+        influencer_id = inf['IDU']
+        influencer_nombre = inf['Nombre']
+        puntaje_total = inf['Puntaje_Total']
+        
+        # 2. Planta con la que más ha interactuado
+        sql_planta_principal = f"""
+        WITH InteraccionesPlantas AS (
+            -- Publicaciones con fotos de plantas
+            SELECT p.IDProd, COUNT(*) as cantidad
+            FROM Publicacion pub
+            JOIN Tener_Foto tf ON pub.IDPub = tf.IDPub
+            JOIN Contribucion_Foto cf ON tf.IDF = cf.IDF
+            JOIN Planta p ON cf.IDProd = p.IDProd
+            WHERE pub.IDU = {influencer_id}
+            GROUP BY p.IDProd
+            
+            UNION ALL
+            
+            -- Publicaciones con videos de plantas
+            SELECT p.IDProd, COUNT(*) as cantidad
+            FROM Publicacion pub
+            JOIN Contribucion_Video cv ON pub.IDV = cv.IDV
+            JOIN Planta p ON cv.IDProd = p.IDProd
+            WHERE pub.IDU = {influencer_id}
+            GROUP BY p.IDProd
+            UNION ALL
+            
+            -- Compras del influencer
+            SELECT p.IDProd, SUM(Cantidad) as cantidad
+            FROM Compra c
+            JOIN Planta p ON c.IDProd = p.IDProd
+            WHERE c.IDUC = {influencer_id}
+            GROUP BY p.IDProd
+        )
+        SELECT 
+            p.IDProd,
+            p.NombreComun,
+            SUM(ip.cantidad) as total_interacciones
+        FROM InteraccionesPlantas ip
+        JOIN Planta p ON ip.IDProd = p.IDProd
+        GROUP BY p.IDProd, p.NombreComun
+        ORDER BY total_interacciones DESC
+        LIMIT 1;
+        """
+        planta_data = DatabaseConnector.execute_query(sql_planta_principal)
+        
+        if not planta_data or not planta_data[0]['IDProd']:
             continue
             
-        sql_sales = """
-        SELECT 
-            SUM(CASE WHEN Fecha BETWEEN DATE_SUB(%s, INTERVAL 14 DAY) AND %s THEN Cantidad ELSE 0 END) as Ventas_Antes,
-            SUM(CASE WHEN Fecha BETWEEN %s AND DATE_ADD(%s, INTERVAL 14 DAY) THEN Cantidad ELSE 0 END) as Ventas_Despues
-        FROM Compra
-        WHERE IDProd = %s;
+        planta_id = planta_data[0]['IDProd']
+        planta_nombre = planta_data[0]['NombreComun']
+        
+        # 3. Fechas de publicaciones recientes sobre esta planta
+        sql_fechas_publicaciones = f"""
+        SELECT DISTINCT c.Fecha
+        FROM Publicacion p
+        LEFT JOIN Tener_Foto tf ON p.IDPub = tf.IDPub
+        LEFT JOIN Contribucion_Foto cf ON tf.IDF = cf.IDF
+        LEFT JOIN Contribucion c ON cf.IDProd = c.IDProd AND cf.Fecha = c.Fecha
+        WHERE p.IDU = {influencer_id}
+          AND (c.IDProd = {planta_id} OR p.IDV IN (
+              SELECT cv.IDV 
+              FROM Contribucion_Video cv 
+              WHERE cv.IDProd = {planta_id}
+          ))
+        ORDER BY c.Fecha DESC
+        LIMIT 3;
         """
-        sales_data = DatabaseConnector.execute_query(sql_sales, (pub_date, pub_date, pub_date, pub_date, product_id))
         
-        v_antes = sales_data[0]['Ventas_Antes'] or 0
-        v_despues = sales_data[0]['Ventas_Despues'] or 0
+        fechas_pub = DatabaseConnector.execute_query(sql_fechas_publicaciones)
         
-        if v_antes > 0:
-            incremento_pct = ((v_despues - v_antes) / v_antes) * 100
+        ventas_antes = 0
+        ventas_despues = 0
+        
+        if fechas_pub:
+            # 4. Calcular ventas alrededor de cada publicación
+            for fecha_obj in fechas_pub:
+                fecha = fecha_obj['Fecha']
+                
+                sql_ventas = f"""
+                SELECT 
+                    COALESCE(SUM(CASE 
+                        WHEN Fecha BETWEEN DATE_SUB('{fecha}', INTERVAL 14 DAY) AND '{fecha}'
+                        THEN Cantidad ELSE 0 END), 0) as ventas_antes,
+                    COALESCE(SUM(CASE 
+                        WHEN Fecha BETWEEN '{fecha}' AND DATE_ADD('{fecha}', INTERVAL 14 DAY)
+                        THEN Cantidad ELSE 0 END), 0) as ventas_despues
+                FROM Compra
+                WHERE IDProd = {planta_id};
+                """
+                
+                ventas = DatabaseConnector.execute_query(sql_ventas)
+                
+                if ventas:
+                    ventas_antes += ventas[0]['ventas_antes'] or 0
+                    ventas_despues += ventas[0]['ventas_despues'] or 0
+        
+        # 5. Calcular incremento porcentual
+        if ventas_antes > 0:
+            incremento_pct = ((ventas_despues - ventas_antes) / ventas_antes) * 100
         else:
-            incremento_pct = 100 if v_despues > 0 else 0
-
-        sql_conversion = """
+            incremento_pct = 100 if ventas_despues > 0 else 0
+        
+        # 6. Tasa de conversión simplificada
+        sql_tasa_conversion = f"""
+        WITH UsuariosReaccionaron AS (
+    SELECT DISTINCT r.IDU
+    FROM Reaccionar r
+    JOIN Publicacion p ON r.IDPub = p.IDPub
+    WHERE p.IDU = {influencer_id}
+      AND p.IDPub IN (
+          SELECT p2.IDPub
+          FROM Publicacion p2
+          LEFT JOIN Tener_Foto tf ON p2.IDPub = tf.IDPub
+          LEFT JOIN Contribucion_Foto cf ON tf.IDF = cf.IDF
+          LEFT JOIN Contribucion_Video cv ON p2.IDV = cv.IDV
+          WHERE (cf.IDProd = {planta_id} OR cv.IDProd = {planta_id})
+      )
+),
+UsuariosCompraron AS (
+    SELECT DISTINCT c.IDUC
+    FROM Compra c
+    WHERE c.IDProd = {planta_id}
+      AND c.IDUC IN (SELECT IDU FROM UsuariosReaccionaron)
+      AND c.IDUC IN (
+          SELECT r2.IDU
+          FROM Reaccionar r2
+          JOIN Publicacion p2 ON r2.IDPub = p2.IDPub
+          WHERE p2.IDU = {influencer_id}
+            AND c.Fecha >= r2.Fecha
+            AND c.Fecha <= DATE_ADD(r2.Fecha, INTERVAL 30 DAY)
+      )
+)
         SELECT 
-            (COUNT(DISTINCT c.IDUC) / NULLIF((SELECT COUNT(DISTINCT IDU) FROM Reaccionar WHERE IDPub = %s), 0)) * 100 as Tasa_Conversion
-        FROM Compra c
-        JOIN Reaccionar r ON c.IDUC = r.IDU
-        WHERE r.IDPub = %s 
-          AND c.IDProd = %s
-          AND c.Fecha >= r.Fecha; 
+            CASE 
+                WHEN (SELECT COUNT(*) FROM UsuariosReaccionaron) > 0 
+                THEN (SELECT COUNT(*) FROM UsuariosCompraron) * 100.0 / 
+                    (SELECT COUNT(*) FROM UsuariosReaccionaron)
+                ELSE 0 
+            END as tasa_conversion;
         """
-        conv_data = DatabaseConnector.execute_query(sql_conversion, (pub_id, pub_id, product_id))
-        tasa_conv = conv_data[0]['Tasa_Conversion'] or 0.0
-
+        
+        conv_data = DatabaseConnector.execute_query(sql_tasa_conversion)
+        tasa_conv = conv_data[0]['tasa_conversion'] if conv_data and conv_data[0]['tasa_conversion'] else 0
+        
         results.append({
-            "Influencer": post['Nombre'],
-            "Puntaje Impacto": float(post['Puntaje_Total']),
-            "Planta Promocionada (ID)": product_id,
-            "Fecha Publicación": pub_date,
-            "Ventas Antes (2sem)": v_antes,
-            "Ventas Después (2sem)": v_despues,
-            "Incremento Ventas %": round(incremento_pct, 2),
-            "Tasa Conversión %": round(tasa_conv, 2)
+            "Influencer": influencer_nombre,
+            "Puntaje_Impacto": float(puntaje_total),
+            "Planta_Promocionada_ID": planta_id,
+            "Planta_Promocionada_Nombre": planta_nombre,
+            "Ventas_Antes_2sem": ventas_antes,
+            "Ventas_Despues_2sem": ventas_despues,
+            "Incremento_Ventas_%": round(incremento_pct, 2),
+            "Tasa_Conversion_%": round(tasa_conv, 2)
         })
-
+    
     return results
 
 
